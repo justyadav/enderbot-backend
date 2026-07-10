@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EnderBot Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #050508;
+            color: #FFFFFF;
+            font-family: Arial, sans-serif;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 20px 0;
+            border-bottom: 1px solid #2A2A4A;
+            margin-bottom: 30px;
+        }
+        .header .logo {
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, #6C3CE1, #FF2D95);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            font-weight: 900;
+            color: white;
+        }
+        .header h1 {
+            font-size: 24px;
+            background: linear-gradient(135deg, #6C3CE1, #FF2D95);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .header .status {
+            margin-left: auto;
+            padding: 6px 16px;
+            border-radius: 20px;
+            background: rgba(0, 245, 255, 0.1);
+            border: 1px solid rgba(0, 245, 255, 0.2);
+            color: #00F5FF;
+            font-size: 13px;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 16px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: #12121A;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #2A2A4A;
+            text-align: center;
+        }
+        .stat-card .number {
+            font-size: 28px;
+            font-weight: 800;
+            color: #8A6DE9;
+        }
+        .stat-card .label {
+            color: #6A6A8A;
+            font-size: 13px;
+            margin-top: 4px;
+        }
+        .guilds-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 12px;
+        }
+        .guild-card {
+            background: #12121A;
+            padding: 16px;
+            border-radius: 12px;
+            border: 1px solid #2A2A4A;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .guild-card .guild-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: #2A2A4A;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            font-weight: 700;
+        }
+        .guild-card .guild-name {
+            flex: 1;
+            font-weight: 600;
+        }
+        .guild-card .guild-members {
+            color: #6A6A8A;
+            font-size: 13px;
+        }
+        .footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #2A2A4A;
+            text-align: center;
+            color: #6A6A8A;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">E</div>
+            <h1>{{ bot_name }} Dashboard</h1>
+            <span class="status">🟢 Online</span>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="number">{{ server_count }}</div>
+                <div class="label">Servers</div>
+            </div>
+            <div class="stat-card">
+                <div class="number">{{ user_count }}</div>
+                <div class="label">Users</div>
+            </div>
+            <div class="stat-card">
+                <div class="number">{{ command_count }}</div>
+                <div class="label">Commands</div>
+            </div>
+            <div class="stat-card">
+                <div class="number">{{ latency }}ms</div>
+                <div class="label">Latency</div>
+            </div>
+            <div class="stat-card">
+                <div class="number">{{ uptime }}</div>
+                <div class="label">Uptime</div>
+            </div>
+            <div class="stat-card">
+                <div class="number">{{ version }}</div>
+                <div class="label">Version</div>
+            </div>
+        </div>
+
+        <h2 style="margin-bottom: 16px; font-size: 18px;">📊 Servers ({{ server_count }})</h2>
+        <div class="guilds-grid">
+            {% for guild in guilds %}
+            <div class="guild-card">
+                <div class="guild-icon">
+                    {% if guild.icon %}
+                    <img src="{{ guild.icon }}" width="40" height="40" style="border-radius: 50%;" />
+                    {% else %}
+                    {{ guild.name[:2]|upper }}
+                    {% endif %}
+                </div>
+                <div class="guild-name">{{ guild.name }}</div>
+                <div class="guild-members">👥 {{ guild.member_count }}</div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="footer">
+            Made with ❤️ by yaduvanshi1816_ • EnderBot {{ version }}
+            {% if mongo_connected %} • 📦 MongoDB Connected{% else %} • 📦 In-Memory DB{% endif %}
+        </div>
+    </div>
+</body>
+</html>
