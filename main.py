@@ -1,4 +1,3 @@
-# main.py
 import os
 import sys
 import asyncio
@@ -23,13 +22,20 @@ print("=" * 60)
 import discord
 from discord.ext import commands, tasks
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from dotenv import load_dotenv
 import uvicorn
+import httpx
 
 # Try to import optional dependencies
+try:
+    from motor.motor_asyncio import AsyncIOMotorClient
+except ImportError:
+    print("⚠️ motor not installed - MongoDB functionality will be restricted")
+
 try:
     import psutil
     PSUTIL_AVAILABLE = True
@@ -58,8 +64,15 @@ SUPPORT_SERVER_URL = os.getenv("SUPPORT_SERVER_URL", "https://discord.gg/PGwbyWX
 USE_MONGODB = os.getenv("USE_MONGODB", "false").lower() == "true"
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 
+# OAuth2 Config
+CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
+CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
+REDIRECT_URI = os.getenv("DISCORD_REDIRECT_URI", "https://enderbot-dashboard-1xtu.onrender.com/api/auth/callback")
+FRONTEND_URL = "https://enderbot.dpdns.org"
+
 print(f"✅ Configuration loaded:")
 print(f"  - Token: {'✅' if TOKEN else '❌ Missing!'}")
+print(f"  - OAuth2 Client ID: {'✅' if CLIENT_ID else '❌ Missing!'}")
 print(f"  - MongoDB: {'✅ Enabled' if USE_MONGODB else '❌ Disabled'}")
 print(f"  - Port: {os.getenv('PORT', '10000')}")
 
@@ -68,7 +81,7 @@ if not TOKEN:
     sys.exit(1)
 
 # ─── Global Variables ──────────────────────────────────────────────
-db_client: Optional[AsyncIOMotorClient] = None
+db_client: Optional[Any] = None
 db: Optional[Any] = None
 mongo_connected = False
 bot_ready = False
@@ -91,7 +104,6 @@ bot = commands.Bot(
     help_command=None
 )
 
-# ─── Bot Start Time ─────────────────────────────────────────────────
 bot.start_time = datetime.now(timezone.utc)
 bot.version = VERSION
 bot.support_server = SUPPORT_SERVER_URL
@@ -99,99 +111,51 @@ bot.support_server = SUPPORT_SERVER_URL
 # ─── In-Memory Database Fallback ──────────────────────────────────
 class InMemoryDB:
     def __init__(self):
-        self.data = {}
         self.collections = {}
-        self._ping_ok = True
-    
+        
     def __getattr__(self, name):
         if name not in self.collections:
             self.collections[name] = InMemoryCollection()
         return self.collections[name]
     
+    def __getitem__(self, name):
+        return self.__getattr__(name)
+        
     async def command(self, cmd):
         return {"ok": 1}
-    
-    async def list_collection_names(self):
-        return list(self.collections.keys())
-    
-    def close(self):
-        pass
 
 class InMemoryCollection:
     def __init__(self):
         self.data = []
         self.index = 0
-    
+        
     async def find_one(self, filter_dict):
         for item in self.data:
-            matches = True
-            for key, value in filter_dict.items():
-                if item.get(key) != value:
-                    matches = False
-                    break
-            if matches:
+            if all(item.get(k) == v for k, v in filter_dict.items()):
                 return item
         return None
-    
-    async def find(self, filter_dict=None):
-        if not filter_dict:
-            return self.data
-        results = []
-        for item in self.data:
-            matches = True
-            for key, value in filter_dict.items():
-                if item.get(key) != value:
-                    matches = False
-                    break
-            if matches:
-                results.append(item)
-        return results
-    
-    async def insert_one(self, document):
-        self.index += 1
-        document['_id'] = self.index
-        self.data.append(document)
-        return {'inserted_id': self.index}
-    
+        
     async def update_one(self, filter_dict, update_dict, upsert=False):
         doc = await self.find_one(filter_dict)
+        set_data = update_dict.get('$set', {})
         if doc:
-            for key, value in update_dict.get('$set', {}).items():
-                doc[key] = value
+            for k, v in set_data.items():
+                doc[k] = v
             return {'matched_count': 1, 'modified_count': 1}
         elif upsert:
             new_doc = filter_dict.copy()
-            for key, value in update_dict.get('$set', {}).items():
-                new_doc[key] = value
-            await self.insert_one(new_doc)
+            for k, v in set_data.items():
+                new_doc[k] = v
+            self.index += 1
+            new_doc['_id'] = self.index
+            self.data.append(new_doc)
             return {'matched_count': 0, 'modified_count': 0, 'upserted_id': self.index}
         return {'matched_count': 0, 'modified_count': 0}
-    
-    async def delete_one(self, filter_dict):
-        for i, item in enumerate(self.data):
-            matches = True
-            for key, value in filter_dict.items():
-                if item.get(key) != value:
-                    matches = False
-                    break
-            if matches:
-                del self.data[i]
-                return {'deleted_count': 1}
-        return {'deleted_count': 0}
-    
-    async def count_documents(self, filter_dict=None):
-        if not filter_dict:
-            return len(self.data)
-        count = 0
-        for item in self.data:
-            matches = True
-            for key, value in filter_dict.items():
-                if item.get(key) != value:
-                    matches = False
-                    break
-            if matches:
-                count += 1
-        return count
+
+# ─── Pydantic Validation Models ──────────────────────────────────────
+class GuildSettingsUpdate(BaseModel):
+    prefix: Optional[str] = None
+    economy_enabled: Optional[bool] = None
 
 # ─── Dynamic Status Loop ────────────────────────────────────────────
 @tasks.loop(minutes=5)
@@ -201,13 +165,9 @@ async def update_status():
     try:
         total_servers = len(bot.guilds)
         total_members = sum(guild.member_count or 0 for guild in bot.guilds)
-        total_commands = len(bot.tree.get_commands())
         status_text = f"{total_servers} servers • {total_members} users • /help"
         await bot.change_presence(
-            activity=discord.Activity(
-                type=discord.ActivityType.watching,
-                name=status_text
-            ),
+            activity=discord.Activity(type=discord.ActivityType.watching, name=status_text),
             status=discord.Status.online
         )
         log.info(f"🔄 Updated presence: {status_text}")
@@ -217,368 +177,176 @@ async def update_status():
 @update_status.before_loop
 async def before_update_status():
     await bot.wait_until_ready()
-    log.info("🔄 Status update loop started")
-
-# ─── Discord Bot Events ─────────────────────────────────────────────
 
 @bot.event
 async def on_ready():
     global bot_ready
     with bot_ready_lock:
         bot_ready = True
-    
-    log.info(f"🟢 Bot is online as: {bot.user.name}#{bot.user.discriminator}")
-    log.info(f"📊 Connected to {len(bot.guilds)} guilds")
-    log.info(f"👥 Serving {sum(guild.member_count or 0 for guild in bot.guilds)} users")
-    log.info(f"🔗 Invite URL: https://discord.com/oauth2/authorize?client_id={bot.user.id}&permissions=8&scope=bot%20applications.commands")
-    log.info(f"📦 Database: {'MongoDB' if mongo_connected else 'In-Memory (Fallback)'}")
-    
+    log.info(f"🟢 Bot online as: {bot.user}")
+    update_status.start()
     await load_extensions()
 
-# ─── Load Extensions ─────────────────────────────────────────────────
-
 async def load_extensions():
-    extensions = [
-        'cogs.general',
-        'cogs.moderation',
-        'cogs.logging',
-        'cogs.autorole',
-        'cogs.config',
-        'cogs.help'
-    ]
-    
-    log.info("📦 Loading extensions...")
+    extensions = ['cogs.general', 'cogs.moderation', 'cogs.logging', 'cogs.autorole', 'cogs.config', 'cogs.help']
     for ext in extensions:
         try:
             await bot.load_extension(ext)
             log.info(f"  ✅ Loaded: {ext}")
         except Exception as e:
             log.error(f"  ❌ Failed to load {ext}: {e}")
-            traceback.print_exc()
-    
+            
     try:
         synced = await bot.tree.sync()
         log.info(f"🔄 Synced {len(synced)} slash commands")
     except Exception as e:
         log.error(f"❌ Failed to sync slash commands: {e}")
-        traceback.print_exc()
 
 # ─── FastAPI Lifespan Manager ──────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global db_client, db, mongo_connected
-    
-    log.info("🚀 Starting EnderBot v2...")
-    
     try:
-        # Connect to MongoDB (or use fallback)
         if USE_MONGODB and MONGO_URI:
             try:
                 log.info("📡 Connecting to MongoDB...")
-                db_client = AsyncIOMotorClient(
-                    MONGO_URI,
-                    serverSelectionTimeoutMS=5000,
-                    connectTimeoutMS=5000,
-                    socketTimeoutMS=5000
-                )
+                db_client = AsyncIOMotorClient(MONGO_URI, serverSelectionTimeoutMS=5000)
                 db = db_client[DB_NAME]
                 await db.command("ping")
                 mongo_connected = True
                 log.info("✅ MongoDB connection established")
             except Exception as e:
-                log.error(f"❌ MongoDB connection failed: {e}")
-                log.warning("⚠️ Falling back to in-memory database")
-                mongo_connected = False
+                log.error(f"❌ MongoDB failed: {e}. Falling back to In-Memory.")
                 db = InMemoryDB()
         else:
-            log.warning("⚠️ MongoDB disabled or not configured. Using in-memory database.")
-            mongo_connected = False
             db = InMemoryDB()
-        
+            
         bot.db = db
         bot.mongo_connected = mongo_connected
         
-        # Start the bot
-        log.info("🤖 Starting Discord bot...")
-        bot_task = asyncio.create_task(bot.start(TOKEN))
-        
-        # Wait for bot to be ready
-        log.info("⏳ Waiting for bot to connect...")
-        timeout = 60
-        start = datetime.now(timezone.utc)
-        
-        while not bot_ready and (datetime.now(timezone.utc) - start).seconds < timeout:
-            await asyncio.sleep(0.5)
-        
-        if not bot_ready:
-            log.error("❌ Bot connection timed out after 60 seconds")
-            raise RuntimeError("Bot connection timed out")
-        
-        log.info("✅ Bot startup complete")
-            
-    except Exception as e:
-        log.error(f"❌ Startup error: {e}")
-        traceback.print_exc()
-        raise
-    
-    yield
-    
-    log.info("🛑 Shutting down EnderBot...")
-    try:
+        asyncio.create_task(bot.start(TOKEN))
+        yield
+    finally:
         if update_status.is_running():
             update_status.cancel()
-            log.info("  ✅ Status loop stopped")
-        if bot.is_ready():
-            await bot.close()
-            log.info("  ✅ Bot connection closed")
-        if db_client and mongo_connected:
-            db_client.close()
-            log.info("  ✅ Database connection closed")
-    except Exception as e:
-        log.error(f"❌ Shutdown error: {e}")
-        traceback.print_exc()
-    
-    log.info("✅ Shutdown complete")
+        await bot.close()
 
-# ─── FastAPI Application ────────────────────────────────────────────
-app = FastAPI(
-    title="EnderBot Dashboard",
-    description="Modern Discord Bot Management Dashboard",
-    version=VERSION,
-    lifespan=lifespan
-)
+app = FastAPI(title="EnderRes Dashboard", version=VERSION, lifespan=lifespan)
 
 # ─── CORS Middleware ───────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://yourusername.github.io",
         "https://enderbot.dpdns.org",
-        "http://localhost:3000",
-        "http://localhost:8080"
+        "https://enderbot-dashboard-1xtu.onrender.com",
+        "http://localhost:3000"
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ─── Templates ──────────────────────────────────────────────────────
-templates = Jinja2Templates(directory="templates")
+# ─── Helper Logic ──────────────────────────────────────────────────
+def format_uptime(delta) -> str:
+    hours, remainder = divmod(delta.seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{delta.days}d {hours}h {minutes}m" if delta.days > 0 else f"{hours}h {minutes}m {seconds}s"
 
-# ─── API Routes ─────────────────────────────────────────────────────
+# ─── API Routes (OAuth2 & Guild Management) ─────────────────────────
 
-@app.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request):
-    if not bot.is_ready():
-        return templates.TemplateResponse("loading.html", {
-            "request": request,
-            "message": "Bot is initializing... Please refresh in a moment."
-        })
+@app.get("/api/auth/login")
+async def auth_login():
+    scope = "identify guilds"
+    discord_login_url = (
+        f"https://discord.com/api/oauth2/authorize"
+        f"?client_id={CLIENT_ID}"
+        f"&redirect_uri={httpx.URL(REDIRECT_URI)}"
+        f"&response_type=code"
+        f"&scope={scope}"
+    )
+    return RedirectResponse(discord_login_url)
+
+@app.get("/api/auth/callback")
+async def auth_callback(code: str):
+    data = {
+        'client_id': CLIENT_ID,
+        'client_secret': CLIENT_SECRET,
+        'grant_type': 'authorization_code',
+        'code': code,
+        'redirect_uri': REDIRECT_URI
+    }
+    headers = {'Content-Type': 'application/x-www-form-urlencoded'}
     
-    guilds_data = []
-    total_users = 0
-    total_channels = 0
-    total_voice = 0
-    
-    for guild in bot.guilds:
-        member_count = guild.member_count or 0
-        total_users += member_count
-        total_channels += len(guild.channels)
-        total_voice += len(guild.voice_channels)
+    async with httpx.AsyncClient() as client:
+        token_res = await client.post("https://discord.com/api/oauth2/token", data=data, headers=headers)
+        if token_res.status_code != 200:
+            raise HTTPException(status_code=400, detail="Token exchange failed.")
         
-        config = {}
-        if bot.db:
-            try:
-                if not isinstance(bot.db, InMemoryDB):
-                    doc = await bot.db["guild_settings"].find_one({"guild_id": guild.id})
-                else:
-                    doc = await bot.db.guild_settings.find_one({"guild_id": guild.id})
-                if doc:
-                    config = doc
-            except:
-                pass
-        
-        guilds_data.append({
-            "name": guild.name,
-            "id": guild.id,
-            "member_count": member_count,
-            "icon": guild.icon.url if guild.icon else None,
-            "owner": str(guild.owner) if guild.owner else "Unknown",
-            "config": config
-        })
-    
-    guilds_data.sort(key=lambda x: x["member_count"], reverse=True)
-    uptime = datetime.now(timezone.utc) - bot.start_time
-    uptime_str = format_uptime(uptime)
-    
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request,
-        "bot_name": bot.user.name,
-        "bot_avatar": bot.user.display_avatar.url,
-        "bot_id": bot.user.id,
-        "latency": round(bot.latency * 1000, 2),
-        "server_count": len(bot.guilds),
-        "user_count": total_users,
-        "channel_count": total_channels,
-        "voice_count": total_voice,
-        "command_count": len(bot.tree.get_commands()),
-        "uptime": uptime_str,
-        "version": VERSION,
-        "start_time": bot.start_time.isoformat(),
-        "guilds": guilds_data[:20],
-        "support_server": SUPPORT_SERVER_URL,
-        "mongo_connected": mongo_connected
-    })
+        access_token = token_res.json().get('access_token')
+        return RedirectResponse(f"{FRONTEND_URL}/#token={access_token}")
 
 @app.get("/api/status")
 async def api_status():
     if not bot.is_ready():
-        return JSONResponse({
-            "status": "initializing",
-            "message": "Bot is starting up..."
-        }, status_code=503)
-    
-    total_commands = len(bot.tree.get_commands())
-    total_guilds = len(bot.guilds)
-    total_users = sum(guild.member_count or 0 for guild in bot.guilds)
-    uptime = datetime.now(timezone.utc) - bot.start_time
-    
+        return JSONResponse({"status": "initializing"}, status_code=503)
     return {
         "status": "online",
-        "database": "connected" if mongo_connected else "fallback",
-        "bot": {
-            "name": bot.user.name,
-            "id": bot.user.id,
-            "discriminator": bot.user.discriminator,
-            "avatar": bot.user.display_avatar.url
-        },
-        "stats": {
-            "guilds": total_guilds,
-            "users": total_users,
-            "commands": total_commands,
-            "latency_ms": round(bot.latency * 1000, 2),
-            "uptime_seconds": int(uptime.total_seconds()),
-            "uptime_formatted": format_uptime(uptime),
-            "start_time": bot.start_time.isoformat()
-        },
-        "version": VERSION
+        "bot": {"name": bot.user.name, "id": bot.user.id, "avatar": bot.user.display_avatar.url}
     }
 
 @app.get("/api/guilds")
-async def api_guilds():
-    if not bot.is_ready():
-        raise HTTPException(status_code=503, detail="Bot is not ready")
-    
-    guilds_list = []
-    for guild in bot.guilds:
-        guilds_list.append({
-            "id": guild.id,
-            "name": guild.name,
-            "icon": guild.icon.url if guild.icon else None,
-            "member_count": guild.member_count or 0,
-            "owner_id": guild.owner_id,
-            "owner_name": str(guild.owner) if guild.owner else None,
-            "created_at": guild.created_at.isoformat()
-        })
-    
-    return guilds_list
-
-@app.get("/health")
-async def health_check():
-    db_status = "disconnected"
-    if mongo_connected:
-        db_status = "connected"
-    elif bot.db:
-        db_status = "fallback"
-    
-    return {
-        "status": "healthy",
-        "bot": "ready" if bot.is_ready() else "initializing",
-        "database": db_status,
-        "version": VERSION,
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
+async def api_guilds(request: Request):
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized Access")
+        
+    token = auth_header.split(" ")[1]
+    async with httpx.AsyncClient() as client:
+        user_guilds_res = await client.get("https://discord.com/api/users/@me/guilds", headers={"Authorization": f"Bearer {token}"})
+        if user_guilds_res.status_code != 200:
+            raise HTTPException(status_code=401, detail="Invalid Session Token")
+        user_guilds = user_guilds_res.json()
+        
+    valid_guilds = []
+    for g in user_guilds:
+        perms = int(g.get("permissions", 0))
+        if (perms & 0x8 == 0x8) or (perms & 0x20 == 0x20): # Admin or Manage Guild
+            bot_guild = bot.get_guild(int(g["id"]))
+            valid_guilds.append({
+                "id": g["id"],
+                "name": g["name"],
+                "icon": f"https://cdn.discordapp.com/icons/{g['id']}/{g['icon']}.png" if g['icon'] else None,
+                "bot_in_guild": bot_guild is not None,
+                "member_count": bot_guild.member_count if bot_guild else 0
+            })
+    return valid_guilds
 
 @app.get("/api/guilds/{guild_id}")
-async def api_guild_detail(guild_id: int):
-    if not bot.is_ready():
-        raise HTTPException(status_code=503, detail="Bot is not ready")
-    
+async def api_guild_detail(guild_id: int, request: Request):
     guild = bot.get_guild(guild_id)
     if not guild:
-        raise HTTPException(status_code=404, detail="Guild not found")
-    
+        raise HTTPException(status_code=404, detail="Guild not visible to bot")
+        
     config = {}
     if bot.db:
-        try:
-            if not isinstance(bot.db, InMemoryDB):
-                doc = await bot.db["guild_settings"].find_one({"guild_id": guild_id})
-            else:
-                doc = await bot.db.guild_settings.find_one({"guild_id": guild_id})
-            if doc:
-                config = doc
-        except:
-            pass
-    
-    return {
-        "id": guild.id,
-        "name": guild.name,
-        "icon": guild.icon.url if guild.icon else None,
-        "banner": guild.banner.url if guild.banner else None,
-        "description": guild.description,
-        "member_count": guild.member_count or 0,
-        "owner_id": guild.owner_id,
-        "owner_name": str(guild.owner) if guild.owner else None,
-        "created_at": guild.created_at.isoformat(),
-        "joined_at": guild.me.joined_at.isoformat() if guild.me.joined_at else None,
-        "premium_tier": guild.premium_tier,
-        "premium_subscription_count": guild.premium_subscription_count,
-        "verification_level": str(guild.verification_level),
-        "features": guild.features,
-        "channel_count": len(guild.channels),
-        "voice_count": len(guild.voice_channels),
-        "role_count": len(guild.roles),
-        "emoji_count": len(guild.emojis),
-        "config": config
-    }
+        doc = await bot.db["guild_settings"].find_one({"guild_id": guild_id})
+        if doc:
+            config = {"prefix": doc.get("prefix"), "economy_enabled": doc.get("economy_enabled")}
+            
+    return {"id": guild.id, "name": guild.name, "config": config}
 
-def format_uptime(delta) -> str:
-    days = delta.days
-    hours, remainder = divmod(delta.seconds, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    
-    if days > 0:
-        return f"{days}d {hours}h {minutes}m {seconds}s"
-    elif hours > 0:
-        return f"{hours}h {minutes}m {seconds}s"
-    elif minutes > 0:
-        return f"{minutes}m {seconds}s"
-    else:
-        return f"{seconds}s"
+@app.post("/api/guilds/{guild_id}/settings")
+async def update_guild_settings(guild_id: int, settings: GuildSettingsUpdate):
+    update_data = {}
+    if settings.prefix is not None:
+        update_data["prefix"] = settings.prefix[:5]
+    if settings.economy_enabled is not None:
+        update_data["economy_enabled"] = settings.economy_enabled
 
-# ─── Main Execution ─────────────────────────────────────────────────
+    if bot.db:
+        await bot.db["guild_settings"].update_one({"guild_id": guild_id}, {"$set": update_data}, upsert=True)
+        return {"status": "success"}
+    raise HTTPException(status_code=500, detail="Database Offline")
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 10000))
-    host = os.getenv("HOST", "0.0.0.0")
-    
-    print(f"🚀 Starting EnderBot v{VERSION}")
-    print(f"🌐 Web server: http://{host}:{port}")
-    print(f"📡 Press Ctrl+C to stop")
-    print("=" * 60)
-    
-    try:
-        uvicorn.run(
-            "main:app",
-            host=host,
-            port=port,
-            log_level="info",
-            access_log=False,
-            reload=False
-        )
-    except KeyboardInterrupt:
-        print("\n🛑 Shutting down gracefully...")
-    except Exception as e:
-        print(f"❌ Fatal error: {e}")
-        traceback.print_exc()
-        sys.exit(1)
+    uvicorn.run("main:app", host=os.getenv("HOST", "0.0.0.0"), port=int(os.getenv("PORT", 10000)))
