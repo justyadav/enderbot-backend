@@ -3,9 +3,8 @@ from discord.ext import commands
 from discord import app_commands
 import re
 import logging
-import asyncio
 from datetime import datetime, timedelta, timezone
-from database import guild_settings  # Import global MongoDB collection
+from database import guild_settings  # Global MongoDB collection
 
 log = logging.getLogger(__name__)
 
@@ -15,11 +14,9 @@ class ModUtils(commands.Cog):
         self.invite_regex = re.compile(r"(discord\.gg|discord\.com/invite)/[a-zA-Z0-9]+")
         
         # Automod configuration state cache
-        # Structure: { guild_id: {"anti_invite": bool, "anti_link": bool} }
         self.filter_cache = {}
 
         # Anti-Spam tracking cache
-        # Structure: { (guild_id, user_id): [timestamp1, timestamp2, ...] }
         self.spam_cooldowns = {}
         
         # Hardcoded anti-spam parameters
@@ -42,7 +39,6 @@ class ModUtils(commands.Cog):
         except Exception as e:
             log.error(f"Failed to build automod cache on boot: {e}")
 
-    # --- EVENT: CONTENT FILTERING & AUTOMATED ANTI-SPAM ---
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild:
@@ -57,9 +53,7 @@ class ModUtils(commands.Cog):
         user_id = message.author.id
         cache_key = (guild_id, user_id)
 
-        # =====================================================
-        # 🛡️ ANTI-SPAM DETECTION ENGINE
-        # =====================================================
+        # ─── ANTI-SPAM DETECTION ENGINE ─────────────────────────────
         if cache_key not in self.spam_cooldowns:
             self.spam_cooldowns[cache_key] = []
 
@@ -70,9 +64,9 @@ class ModUtils(commands.Cog):
             if (current_time - ts).total_seconds() <= self.SPAM_WINDOW_SECONDS
         ]
 
-        # Trigger punishment if user hits the maximum allowed message limit within the timeframe
+        # Trigger punishment if user hits the maximum allowed message limit
         if len(self.spam_cooldowns[cache_key]) > self.SPAM_MAX_MESSAGES:
-            self.spam_cooldowns[cache_key].clear() # Reset log window to prevent double triggers
+            self.spam_cooldowns[cache_key].clear() # Reset log window
             
             try:
                 # Apply native Discord timeout duration
@@ -88,7 +82,8 @@ class ModUtils(commands.Cog):
                 # Forward to backend log processing cog if active
                 logging_cog = self.bot.get_cog("GeneralLogging")
                 if logging_cog:
-                    log_channel = await logging_cog.get_log_channel(message.guild, "automod_roles")
+                    # FIX: Changed from "automod_roles" to match the "automod_log" key in GeneralLogging
+                    log_channel = await logging_cog.get_log_channel(message.guild, "automod_log")
                     if log_channel:
                         embed = discord.Embed(
                             title="🚨 Anti-Spam Mitigation Triggered",
@@ -102,9 +97,11 @@ class ModUtils(commands.Cog):
                 pass
             return
 
-        # =====================================================
-        # 🔗 TEXT URL CONTENT FILTERS
-        # =====================================================
+        # FIX: Prevent memory leak by removing keys with empty lists
+        if not self.spam_cooldowns[cache_key]:
+            self.spam_cooldowns.pop(cache_key, None)
+
+        # ─── TEXT URL CONTENT FILTERS ────────────────────────────────
         guild_cache = self.filter_cache.get(guild_id, {"anti_invite": True, "anti_link": False})
         anti_invite_enabled = guild_cache.get("anti_invite", True)
         anti_link_enabled = guild_cache.get("anti_link", False)
@@ -132,7 +129,7 @@ class ModUtils(commands.Cog):
     def link_check(self, text: str) -> bool:
         return "http://" in text.lower() or "https://" in text.lower()
 
-    # --- TOGGLE ANTI-INVITE COMMAND ---
+    # ─── TOGGLE ANTI-INVITE COMMAND ──────────────────────────────────
     @app_commands.command(name="filter-invites", description="Toggle automatic deletion of Discord invite links.")
     @app_commands.checks.has_permissions(manage_guild=True)
     @app_commands.choices(status=[
@@ -140,6 +137,9 @@ class ModUtils(commands.Cog):
         app_commands.Choice(name="Disable", value="off")
     ])
     async def filter_invites(self, interaction: discord.Interaction, status: app_commands.Choice[str]):
+        # FIX: Defer the interaction immediately to account for database roundtrip delays
+        await interaction.response.defer(ephemeral=True)
+        
         is_enabled = (status.value == "on")
         guild_id = interaction.guild_id
 
@@ -153,7 +153,8 @@ class ModUtils(commands.Cog):
             self.filter_cache[guild_id] = {"anti_invite": True, "anti_link": False}
         self.filter_cache[guild_id]["anti_invite"] = is_enabled
 
-        await interaction.response.send_message(f"🛡️ Anti-Invite filter has been set to: **{status.name}d**.")
+        # FIX: Send response using followups since the interaction was deferred
+        await interaction.followup.send(f"🛡️ Anti-Invite filter has been set to: **{status.name}d**.")
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(ModUtils(bot))
