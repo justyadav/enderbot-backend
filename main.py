@@ -134,6 +134,15 @@ class InMemoryCollection:
             if all(item.get(k) == v for k, v in filter_dict.items()):
                 return item
         return None
+
+    async def find(self, filter_dict=None):
+        if not filter_dict:
+            return self.data
+        results = []
+        for item in self.data:
+            if all(item.get(k) == v for k, v in filter_dict.items()):
+                results.append(item)
+        return results
         
     async def update_one(self, filter_dict, update_dict, upsert=False):
         doc = await self.find_one(filter_dict)
@@ -245,12 +254,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# ─── Helper Logic ──────────────────────────────────────────────────
-def format_uptime(delta) -> str:
-    hours, remainder = divmod(delta.seconds, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    return f"{delta.days}d {hours}h {minutes}m" if delta.days > 0 else f"{hours}h {minutes}m {seconds}s"
 
 # ─── API Routes (OAuth2 & Guild Management) ─────────────────────────
 
