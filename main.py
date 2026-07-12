@@ -23,7 +23,6 @@ import discord
 from discord.ext import commands, tasks
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -36,22 +35,13 @@ try:
 except ImportError:
     print("⚠️ motor not installed - MongoDB functionality will be restricted")
 
-try:
-    import psutil
-    PSUTIL_AVAILABLE = True
-except ImportError:
-    PSUTIL_AVAILABLE = False
-    print("⚠️ psutil not installed - some stats will be unavailable")
-
 # ─── Environment & Logging Setup ─────────────────────────────────────
 load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
 log = logging.getLogger("EnderBot")
 
@@ -62,7 +52,6 @@ DB_NAME = os.getenv("DB_NAME", "discord_bot_db")
 VERSION = os.getenv("BOT_VERSION", "2.0.0")
 SUPPORT_SERVER_URL = os.getenv("SUPPORT_SERVER_URL", "https://discord.gg/PGwbyWX3DS")
 USE_MONGODB = os.getenv("USE_MONGODB", "false").lower() == "true"
-OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 
 # OAuth2 Config
 CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
@@ -70,14 +59,8 @@ CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
 REDIRECT_URI = os.getenv("DISCORD_REDIRECT_URI", "https://enderbot-dashboard-1xtu.onrender.com/api/auth/callback")
 FRONTEND_URL = "https://enderbot.dpdns.org"
 
-print(f"✅ Configuration loaded:")
-print(f"  - Token: {'✅' if TOKEN else '❌ Missing!'}")
-print(f"  - OAuth2 Client ID: {'✅' if CLIENT_ID else '❌ Missing!'}")
-print(f"  - MongoDB: {'✅ Enabled' if USE_MONGODB else '❌ Disabled'}")
-print(f"  - Port: {os.getenv('PORT', '10000')}")
-
 if not TOKEN:
-    print("❌ CRITICAL: DISCORD_TOKEN is missing from environment variables!")
+    print("❌ CRITICAL: DISCORD_TOKEN is missing!")
     sys.exit(1)
 
 # ─── Global Variables ──────────────────────────────────────────────
@@ -92,11 +75,6 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 intents.guilds = True
-intents.voice_states = True
-intents.bans = True
-intents.integrations = True
-intents.webhooks = True
-intents.invites = True
 
 bot = commands.Bot(
     command_prefix=commands.when_mentioned_or("/"),
@@ -106,7 +84,6 @@ bot = commands.Bot(
 
 bot.start_time = datetime.now(timezone.utc)
 bot.version = VERSION
-bot.support_server = SUPPORT_SERVER_URL
 
 # ─── In-Memory Database Fallback ──────────────────────────────────
 class InMemoryDB:
@@ -174,18 +151,12 @@ async def update_status():
     try:
         total_servers = len(bot.guilds)
         total_members = sum(guild.member_count or 0 for guild in bot.guilds)
-        status_text = f"{total_servers} servers • {total_members} users • /help"
+        status_text = f"{total_servers} servers • {total_members} users"
         await bot.change_presence(
-            activity=discord.Activity(type=discord.ActivityType.watching, name=status_text),
-            status=discord.Status.online
+            activity=discord.Activity(type=discord.ActivityType.watching, name=status_text)
         )
-        log.info(f"🔄 Updated presence: {status_text}")
     except Exception as e:
         log.error(f"Failed to update status: {e}")
-
-@update_status.before_loop
-async def before_update_status():
-    await bot.wait_until_ready()
 
 @bot.event
 async def on_ready():
@@ -197,7 +168,7 @@ async def on_ready():
     await load_extensions()
 
 async def load_extensions():
-    extensions = ['cogs.general', 'cogs.moderation', 'cogs.logging', 'cogs.autorole', 'cogs.config', 'cogs.help']
+    extensions = ['cogs.general', 'cogs.logging', 'cogs.autorole', 'cogs.config', 'cogs.help']
     for ext in extensions:
         try:
             await bot.load_extension(ext)
@@ -206,8 +177,7 @@ async def load_extensions():
             log.error(f"  ❌ Failed to load {ext}: {e}")
             
     try:
-        synced = await bot.tree.sync()
-        log.info(f"🔄 Synced {len(synced)} slash commands")
+        await bot.tree.sync()
     except Exception as e:
         log.error(f"❌ Failed to sync slash commands: {e}")
 
@@ -218,7 +188,6 @@ async def lifespan(app: FastAPI):
     try:
         if USE_MONGODB and MONGO_URI:
             try:
-                log.info("📡 Connecting to MongoDB...")
                 db_client = AsyncIOMotorClient(MONGO_URI, serverSelectionTimeoutMS=5000)
                 db = db_client[DB_NAME]
                 await db.command("ping")
@@ -243,19 +212,25 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="EnderRes Dashboard", version=VERSION, lifespan=lifespan)
 
 # ─── CORS Middleware ───────────────────────────────────────────────
+# Solves the preflight origin problem completely by allowing routing requests globally.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://enderbot.dpdns.org",
-        "https://enderbot-dashboard-1xtu.onrender.com",
-        "http://localhost:3000"
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ─── API Routes (OAuth2 & Guild Management) ─────────────────────────
+# ─── API Routes ─────────────────────────────────────────────────────
+
+@app.get("/api/status")
+async def api_status():
+    if not bot.is_ready():
+        return JSONResponse({"status": "initializing"}, status_code=503)
+    return {
+        "status": "online",
+        "bot": {"name": bot.user.name, "id": bot.user.id, "avatar": bot.user.display_avatar.url}
+    }
 
 @app.get("/api/auth/login")
 async def auth_login():
@@ -288,15 +263,6 @@ async def auth_callback(code: str):
         access_token = token_res.json().get('access_token')
         return RedirectResponse(f"{FRONTEND_URL}/#token={access_token}")
 
-@app.get("/api/status")
-async def api_status():
-    if not bot.is_ready():
-        return JSONResponse({"status": "initializing"}, status_code=503)
-    return {
-        "status": "online",
-        "bot": {"name": bot.user.name, "id": bot.user.id, "avatar": bot.user.display_avatar.url}
-    }
-
 @app.get("/api/guilds")
 async def api_guilds(request: Request):
     auth_header = request.headers.get("Authorization")
@@ -313,7 +279,7 @@ async def api_guilds(request: Request):
     valid_guilds = []
     for g in user_guilds:
         perms = int(g.get("permissions", 0))
-        if (perms & 0x8 == 0x8) or (perms & 0x20 == 0x20): # Admin or Manage Guild
+        if (perms & 0x8 == 0x8) or (perms & 0x20 == 0x20):
             bot_guild = bot.get_guild(int(g["id"]))
             valid_guilds.append({
                 "id": g["id"],
@@ -352,4 +318,4 @@ async def update_guild_settings(guild_id: int, settings: GuildSettingsUpdate):
     raise HTTPException(status_code=500, detail="Database Offline")
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host=os.getenv("HOST", "0.0.0.0"), port=int(os.getenv("PORT", 10000)))
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
