@@ -1,4 +1,3 @@
-# general.py
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -14,6 +13,7 @@ import logging
 SUPPORT_SERVER_URL = "https://discord.gg/PGwbyWX3DS"
 BOT_INVITE_URL = "https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=8&scope=bot%20applications.commands"
 VERSION = "2.0.0"
+OWNER_IDS = [1165248657466085377]  # Replace with your actual Discord User ID(s) as integers
 
 log = logging.getLogger(__name__)
 
@@ -25,6 +25,7 @@ class General(commands.Cog):
         self.color = discord.Color.blue()
         self.start_time = datetime.now(timezone.utc)
         
+        # ─── Data Arrays ──────────────────────────────────────────────
         self.fun_facts = [
             "The first computer virus was created in 1983.",
             "The average person spends 6 months of their life waiting for red lights to turn green.",
@@ -126,7 +127,9 @@ class General(commands.Cog):
         embed.add_field(name="Latency", value=f"`{latency}ms`", inline=True)
         embed.add_field(name="Python Version", value=f"`{platform.python_version()}`", inline=True)
         embed.add_field(name="discord.py Version", value=f"`{discord.__version__}`", inline=True)
-        embed.set_thumbnail(url=self.bot.user.display_avatar.url)
+        
+        if self.bot.user.display_avatar:
+            embed.set_thumbnail(url=self.bot.user.display_avatar.url)
         embed.set_footer(text=f"Made by yaduvanshi1816_ • {VERSION}")
         
         await interaction.followup.send(embed=embed)
@@ -187,14 +190,15 @@ class General(commands.Cog):
         embed.add_field(name="User ID", value=f"`{member.id}`", inline=True)
         embed.add_field(name="Nickname", value=member.nick or "None", inline=True)
         embed.add_field(name="Account Created", value=f"<t:{int(member.created_at.timestamp())}:R>", inline=True)
-        if interaction.guild:
-            embed.add_field(name="Joined Server", value=f"<t:{int(member.joined_at.timestamp())}:R>" if member.joined_at else "Unknown", inline=True)
+        if interaction.guild and member.joined_at:
+            embed.add_field(name="Joined Server", value=f"<t:{int(member.joined_at.timestamp())}:R>", inline=True)
         
         status = str(member.status).title()
         status_map = {
             "Online": "🟢 Online",
             "Idle": "🟡 Idle",
-            "Do Not Disturb": "🔴 DND",
+            "Do_Not_Disturb": "🔴 DND",
+            "Dnd": "🔴 DND",
             "Offline": "⚫ Offline"
         }
         embed.add_field(name="Status", value=status_map.get(status, status), inline=True)
@@ -240,16 +244,8 @@ class General(commands.Cog):
             description="Add me to your server and level up your community!",
             color=self.color
         )
-        embed.add_field(
-            name="📥 Invite Link",
-            value=f"[Click Here to Invite]({BOT_INVITE_URL})",
-            inline=False
-        )
-        embed.add_field(
-            name="💬 Support Server",
-            value=f"[Join the Community]({SUPPORT_SERVER_URL})",
-            inline=False
-        )
+        embed.add_field(name="📥 Invite Link", value=f"[Click Here to Invite]({BOT_INVITE_URL})", inline=False)
+        embed.add_field(name="💬 Support Server", value=f"[Join the Community]({SUPPORT_SERVER_URL})", inline=False)
         embed.set_thumbnail(url=self.bot.user.display_avatar.url)
         embed.set_footer(text=f"Made by yaduvanshi1816_ • {VERSION}")
         
@@ -261,7 +257,7 @@ class General(commands.Cog):
         await interaction.response.defer(ephemeral=False)
         embed = discord.Embed(
             title="💬 Support Server",
-            description=f"Join our community for help, updates, and more!",
+            description="Join our community for help, updates, and more!",
             color=self.color
         )
         embed.add_field(name="Invite Link", value=f"[Click Here]({SUPPORT_SERVER_URL})", inline=False)
@@ -275,7 +271,7 @@ class General(commands.Cog):
         await interaction.response.defer(ephemeral=False)
         embed = discord.Embed(
             title="⏰ Bot Uptime",
-            description=f"I've been online for:",
+            description="I've been online for:",
             color=self.color
         )
         embed.add_field(name="📊 Uptime", value=f"```\n{self.get_uptime()}\n```", inline=False)
@@ -297,8 +293,8 @@ class General(commands.Cog):
         embed.add_field(name="👑 Creator", value="yaduvanshi1816_", inline=True)
         embed.add_field(name="📚 Library", value="discord.py", inline=True)
         embed.add_field(name="🐍 Python", value=platform.python_version(), inline=True)
-        embed.add_field(name="📊 Servers", value=len(self.bot.guilds), inline=True)
-        embed.add_field(name="👥 Users", value=len(self.bot.users), inline=True)
+        embed.add_field(name="📊 Servers", value=str(len(self.bot.guilds)), inline=True)
+        embed.add_field(name="👥 Users", value=str(len(self.bot.users)), inline=True)
         embed.add_field(name="⚡ Uptime", value=self.get_uptime(), inline=True)
         
         if SUPPORT_SERVER_URL:
@@ -371,9 +367,7 @@ class General(commands.Cog):
         await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="choice", description="Make a choice from multiple options")
-    @app_commands.describe(
-        options="Comma-separated options (e.g., pizza,pasta,sushi)"
-    )
+    @app_commands.describe(options="Comma-separated options (e.g., pizza,pasta,sushi)")
     async def choice(self, interaction: discord.Interaction, *, options: str):
         """Choose randomly from a list of comma-separated options."""
         await interaction.response.defer(ephemeral=False)
@@ -385,7 +379,7 @@ class General(commands.Cog):
         result = random.choice(choices)
         embed = discord.Embed(
             title="🤔 Decision Time",
-            description=f"I choose:",
+            description="I choose:",
             color=self.color
         )
         embed.add_field(name="🎯 Result", value=f"```\n{result}\n```", inline=False)
@@ -424,7 +418,6 @@ class General(commands.Cog):
             options.append(option4)
             
         emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣"]
-        
         description = "\n".join([f"{emojis[i]} {opt}" for i, opt in enumerate(options)])
         
         embed = discord.Embed(
@@ -437,7 +430,6 @@ class General(commands.Cog):
         
         poll_msg = await interaction.followup.send(embed=embed)
         
-        # Add reactions
         for i in range(len(options)):
             await poll_msg.add_reaction(emojis[i])
 
@@ -445,10 +437,10 @@ class General(commands.Cog):
     async def fact(self, interaction: discord.Interaction):
         """Get a random interesting fact."""
         await interaction.response.defer(ephemeral=False)
-        fact = random.choice(self.fun_facts)
+        fact_text = random.choice(self.fun_facts)
         embed = discord.Embed(
             title="💡 Fun Fact",
-            description=fact,
+            description=fact_text,
             color=self.color
         )
         embed.set_footer(text=f"Made by yaduvanshi1816_ • {VERSION}")
@@ -494,15 +486,12 @@ class General(commands.Cog):
     @app_commands.command(name="serverlist", description="List all servers the bot is in")
     async def serverlist(self, interaction: discord.Interaction):
         """List all servers the bot is in (owner only)."""
-        # Check if user is owner
-        if interaction.user.id not in [YOUR_OWNER_ID]:  # Replace with your owner ID
+        if interaction.user.id not in OWNER_IDS:
             await interaction.response.send_message("❌ This command is owner-only.", ephemeral=True)
             return
             
         await interaction.response.defer(ephemeral=True)
-        servers = []
-        for guild in self.bot.guilds:
-            servers.append(f"• {guild.name} (`{guild.id}`) - {guild.member_count} members")
+        servers = [f"• {guild.name} (`{guild.id}`) - {guild.member_count} members" for guild in self.bot.guilds]
             
         chunks = [servers[i:i+20] for i in range(0, len(servers), 20)]
         
@@ -518,8 +507,7 @@ class General(commands.Cog):
     @app_commands.command(name="sync", description="Sync slash commands")
     async def sync(self, interaction: discord.Interaction):
         """Sync slash commands (owner only)."""
-        # Check if user is owner
-        if interaction.user.id not in [YOUR_OWNER_ID]:  # Replace with your owner ID
+        if interaction.user.id not in OWNER_IDS:
             await interaction.response.send_message("❌ This command is owner-only.", ephemeral=True)
             return
             
@@ -530,8 +518,6 @@ class General(commands.Cog):
             await interaction.followup.send("✅ Slash commands synced successfully!", ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"❌ Failed to sync: {e}", ephemeral=True)
-
-    # ─── Error Handling ──────────────────────────────────────────────
 
     @app_commands.command(name="echo", description="Make the bot say something")
     @app_commands.describe(message="The message to echo")
@@ -557,7 +543,7 @@ class General(commands.Cog):
         """Send a custom embed."""
         try:
             color_int = int(color.replace("#", ""), 16) if color else self.color.value
-        except:
+        except ValueError:
             color_int = self.color.value
             
         embed = discord.Embed(
