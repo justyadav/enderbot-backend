@@ -1,11 +1,9 @@
-# help.py
 import discord
 from discord.ext import commands
 from discord import app_commands
 import logging
 from typing import Optional, Dict, List, Union
 from datetime import datetime, timezone
-import itertools
 
 log = logging.getLogger(__name__)
 
@@ -120,7 +118,6 @@ class Help(commands.Cog):
     def get_command_signature(self, command: Union[commands.Command, app_commands.Command]) -> str:
         """Get the command signature with parameters."""
         if isinstance(command, app_commands.Command):
-            # Slash command
             params = []
             for param in command.parameters:
                 if param.required:
@@ -129,7 +126,6 @@ class Help(commands.Cog):
                     params.append(f"[{param.name}]")
             return f"/{command.name} {' '.join(params)}"
         else:
-            # Prefix command
             if command.usage:
                 return f"{command.qualified_name} {command.usage}"
             params = []
@@ -169,7 +165,6 @@ class Help(commands.Cog):
 
     async def get_command_info(self, command_name: str) -> Optional[Dict]:
         """Get detailed information about a command."""
-        # Check if it's a prefix command
         prefix_cmd = self.bot.get_command(command_name)
         if prefix_cmd:
             return {
@@ -184,7 +179,6 @@ class Help(commands.Cog):
                 "hidden": prefix_cmd.hidden or False
             }
         
-        # Check if it's a slash command
         slash_cmd = self.bot.tree.get_command(command_name)
         if slash_cmd:
             return {
@@ -215,8 +209,6 @@ class Help(commands.Cog):
         category: Optional[str] = None
     ):
         """Get help for all commands or a specific command."""
-        
-        # ─── Help for Specific Command ───────────────────────────────
         if command:
             cmd_info = await self.get_command_info(command.lower())
             if cmd_info:
@@ -228,7 +220,6 @@ class Help(commands.Cog):
                 )
             return
             
-        # ─── Help for Specific Category ──────────────────────────────
         if category:
             category = category.lower()
             if category in self.categories:
@@ -241,7 +232,6 @@ class Help(commands.Cog):
                 )
             return
             
-        # ─── Main Help Menu ──────────────────────────────────────────
         await self.send_main_help(interaction)
 
     async def send_main_help(self, interaction: discord.Interaction):
@@ -249,25 +239,22 @@ class Help(commands.Cog):
         embed = discord.Embed(
             title=f"🤖 {self.bot.user.name} Help Menu",
             description=f"**Version:** `{getattr(self.bot, 'version', '2.0.0')}`\n"
-                       f"**Prefix:** `/` (slash commands only)\n"
-                       f"**Commands:** {len(self.bot.tree.get_commands())} slash commands\n\n"
-                       f"Use `/help command:<command>` for detailed info\n"
-                       f"Use `/help category:<category>` for category help\n\n"
-                       f"**📊 Quick Stats:**\n"
-                       f"• Servers: `{len(self.bot.guilds)}`\n"
-                       f"• Users: `{len(self.bot.users)}`\n"
-                       f"• Uptime: `{self.get_bot_uptime()}`",
+                        f"**Prefix:** `/` (slash commands only)\n"
+                        f"**Commands:** {len(self.bot.tree.get_commands())} slash commands\n\n"
+                        f"Use `/help command:<command>` for detailed info\n"
+                        f"Use `/help category:<category>` for category help\n\n"
+                        f"**📊 Quick Stats:**\n"
+                        f"• Servers: `{len(self.bot.guilds)}`\n"
+                        f"• Users: `{len(self.bot.users)}`\n"
+                        f"• Uptime: `{self.get_bot_uptime()}`",
             color=self.embed_color,
             timestamp=datetime.now(timezone.utc)
         )
         
-        # Add categories
         for category_id, data in self.categories.items():
             emoji = data["emoji"]
             name = data["name"]
             description = data["description"]
-            
-            # Count commands in category
             cmd_count = len(data["commands"])
             embed.add_field(
                 name=f"{emoji} {name} ({cmd_count})",
@@ -285,7 +272,6 @@ class Help(commands.Cog):
         
         embed.set_thumbnail(url=self.bot.user.display_avatar.url)
         embed.set_footer(text=f"Made by yaduvanshi1816_ • Requested by {interaction.user.name}")
-        
         await interaction.response.send_message(embed=embed)
 
     async def send_category_help(self, interaction: discord.Interaction, category: str):
@@ -301,31 +287,25 @@ class Help(commands.Cog):
             timestamp=datetime.now(timezone.utc)
         )
         
-        # Get all commands in this category
         commands_info = []
         for cmd_name in category_data["commands"]:
             cmd_info = await self.get_command_info(cmd_name)
             if cmd_info and not cmd_info.get("hidden", False):
                 commands_info.append(cmd_info)
         
-        # Sort commands
         commands_info.sort(key=lambda x: x["name"])
         
-        # Add commands to embed
         for cmd in commands_info:
             signature = cmd["signature"]
             description = cmd["description"]
             perms = cmd["permissions"]
             
-            # Truncate description if too long
             if len(description) > 80:
                 description = description[:77] + "..."
                 
-            # Show permission if not None
             if perms != "None":
                 description += f"\n*Required: {perms}*"
                 
-            # Show aliases
             if cmd["aliases"]:
                 description += f"\n*Aliases: {', '.join(cmd['aliases'])}*"
                 
@@ -339,7 +319,6 @@ class Help(commands.Cog):
             embed.description += "\n\n⚠️ No visible commands in this category."
             
         embed.set_footer(text=f"Made by yaduvanshi1816_ • Use /help command:<command> for detailed info")
-        
         await interaction.response.send_message(embed=embed)
 
     async def send_command_help(self, interaction: discord.Interaction, cmd_info: Dict):
@@ -359,16 +338,13 @@ class Help(commands.Cog):
             timestamp=datetime.now(timezone.utc)
         )
         
-        # Basic info
         embed.add_field(name="📝 Description", value=description, inline=False)
         embed.add_field(name="🔧 Usage", value=f"`{signature}`", inline=False)
         
-        # Type and permissions
         cmd_type_display = "Slash Command" if cmd_type == "slash" else "Prefix Command"
         embed.add_field(name="📌 Type", value=cmd_type_display, inline=True)
         embed.add_field(name="🛡️ Required Permissions", value=permissions, inline=True)
         
-        # Category
         if category and category in self.categories:
             cat_data = self.categories[category]
             embed.add_field(
@@ -377,7 +353,6 @@ class Help(commands.Cog):
                 inline=True
             )
             
-        # Aliases
         if aliases:
             embed.add_field(
                 name="🔗 Aliases",
@@ -385,7 +360,6 @@ class Help(commands.Cog):
                 inline=False
             )
             
-        # Parameters for prefix commands
         if cmd_type == "prefix" and hasattr(cmd, "params"):
             params = []
             for param_name, param in cmd.params.items():
@@ -404,7 +378,6 @@ class Help(commands.Cog):
                     inline=False
                 )
                 
-        # Examples for slash commands
         if cmd_type == "slash" and hasattr(cmd, "parameters"):
             params = []
             for param in cmd.parameters:
@@ -421,7 +394,6 @@ class Help(commands.Cog):
                     inline=False
                 )
                 
-        # Example usage
         example = f"/{cmd_name}" if cmd_type == "slash" else f"{cmd_name}"
         embed.add_field(
             name="💡 Example",
@@ -430,7 +402,6 @@ class Help(commands.Cog):
         )
         
         embed.set_footer(text=f"Made by yaduvanshi1816_ • Requested by {interaction.user.name}")
-        
         await interaction.response.send_message(embed=embed)
 
     def get_bot_uptime(self) -> str:
@@ -463,7 +434,6 @@ class Help(commands.Cog):
             timestamp=datetime.now(timezone.utc)
         )
         
-        # Group by category
         category_commands = {}
         for category_id, data in self.categories.items():
             category_commands[category_id] = {
@@ -472,14 +442,11 @@ class Help(commands.Cog):
                 "commands": []
             }
             
-        # Add commands to categories
         for cmd_name in self.categories["general"]["commands"]:
-            # Check if command exists
             cmd_info = await self.get_command_info(cmd_name)
             if cmd_info and not cmd_info.get("hidden", False):
                 category_commands["general"]["commands"].append(cmd_name)
                 
-        # Add other categories
         for category_id, data in self.categories.items():
             if category_id != "general":
                 for cmd_name in data["commands"]:
@@ -487,7 +454,6 @@ class Help(commands.Cog):
                     if cmd_info and not cmd_info.get("hidden", False):
                         category_commands[category_id]["commands"].append(cmd_name)
         
-        # Build embed
         for category_id, data in category_commands.items():
             if data["commands"]:
                 commands_str = "`, `".join(data["commands"])
@@ -498,7 +464,6 @@ class Help(commands.Cog):
                 )
                 
         embed.set_footer(text=f"Made by yaduvanshi1816_ • Use /help command:<command> for details")
-        
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="permissions", description="Show permissions for a command")
@@ -519,22 +484,12 @@ class Help(commands.Cog):
             timestamp=datetime.now(timezone.utc)
         )
         
-        embed.add_field(
-            name="Required Permission",
-            value=cmd_info["permissions"],
-            inline=True
-        )
-        embed.add_field(
-            name="Command Type",
-            value="Slash" if cmd_info["type"] == "slash" else "Prefix",
-            inline=True
-        )
+        embed.add_field(name="Required Permission", value=cmd_info["permissions"], inline=True)
+        embed.add_field(name="Command Type", value="Slash" if cmd_info["type"] == "slash" else "Prefix", inline=True)
         
-        # Check if user has permission
         if isinstance(interaction.user, discord.Member):
             has_perm = True
             if cmd_info["permissions"] != "None" and cmd_info["permissions"] != "Administrator":
-                # Check if user has the required permission
                 perm_name = cmd_info["permissions"].lower().replace(" ", "_")
                 if hasattr(interaction.user.guild_permissions, perm_name):
                     has_perm = getattr(interaction.user.guild_permissions, perm_name)
@@ -544,14 +499,9 @@ class Help(commands.Cog):
             if cmd_info["permissions"] == "Administrator":
                 has_perm = interaction.user.guild_permissions.administrator
                 
-            embed.add_field(
-                name="You Have Permission",
-                value="✅ Yes" if has_perm else "❌ No",
-                inline=True
-            )
+            embed.add_field(name="You Have Permission", value="✅ Yes" if has_perm else "❌ No", inline=True)
             
         embed.set_footer(text=f"Made by yaduvanshi1816_")
-        
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="bothelp", description="Get help for server administrators")
@@ -572,7 +522,6 @@ class Help(commands.Cog):
                   "• Use `/config setlanguage <language>` to change the language",
             inline=False
         )
-        
         embed.add_field(
             name="2️⃣ Moderation Setup",
             value="• `/config setmodrole @role` - Set mod role\n"
@@ -581,14 +530,12 @@ class Help(commands.Cog):
                   "• `/config setfeature` - Enable/disable features",
             inline=False
         )
-        
         embed.add_field(
             name="3️⃣ Logging Setup",
             value="• `/setlog <type> #channel` - Set log channels\n"
                   "• `/logsettings` - View current logging setup",
             inline=False
         )
-        
         embed.add_field(
             name="4️⃣ Auto-Role Setup",
             value="• `/autorole set @role` - Set primary auto-role\n"
@@ -597,7 +544,6 @@ class Help(commands.Cog):
                   "• `/autorole show` - View current configuration",
             inline=False
         )
-        
         embed.add_field(
             name="5️⃣ Auto-Mod Setup",
             value="• `/filter-invites` - Toggle invite filter\n"
@@ -606,7 +552,6 @@ class Help(commands.Cog):
                   "• `/settings` - View all current settings",
             inline=False
         )
-        
         embed.add_field(
             name="6️⃣ Additional Features",
             value="• Leveling system (coming soon)\n"
@@ -616,7 +561,6 @@ class Help(commands.Cog):
         )
         
         embed.set_footer(text="Made by yaduvanshi1816_ • For more help, join the support server!")
-        
         await interaction.response.send_message(embed=embed)
 
     # ─── Auto-Complete for Help ──────────────────────────────────────
@@ -628,22 +572,19 @@ class Help(commands.Cog):
         current: str
     ) -> List[app_commands.Choice[str]]:
         """Autocomplete for command names in help command."""
-        # Get all commands
-        commands_list = []
+        commands_set = set()
         
-        # Prefix commands
         for cmd in self.bot.commands:
             if not cmd.hidden:
-                commands_list.append(cmd.name)
-                commands_list.extend(cmd.aliases)
+                commands_set.add(cmd.name)
+                for alias in cmd.aliases:
+                    commands_set.add(alias)
                 
-        # Slash commands
         for cmd in self.bot.tree.get_commands():
-            commands_list.append(cmd.name)
+            commands_set.add(cmd.name)
             
-        # Filter based on current input
-        filtered = [cmd for cmd in commands_list if current.lower() in cmd.lower()][:25]
-        
+        # FIX: Filter unique options out of a set to prevent duplicate entry errors
+        filtered = [cmd for cmd in commands_set if current.lower() in cmd.lower()][:25]
         return [app_commands.Choice(name=cmd, value=cmd) for cmd in filtered]
 
     @help.autocomplete("category")
@@ -655,7 +596,6 @@ class Help(commands.Cog):
         """Autocomplete for categories in help command."""
         categories = list(self.categories.keys())
         filtered = [cat for cat in categories if current.lower() in cat.lower()][:25]
-        
         return [app_commands.Choice(name=self.categories[cat]["name"], value=cat) for cat in filtered]
 
     # ─── Error Handling ──────────────────────────────────────────────
@@ -664,35 +604,27 @@ class Help(commands.Cog):
     async def help_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
         """Handle command errors gracefully."""
         if isinstance(error, app_commands.MissingPermissions):
-            await interaction.response.send_message(
-                "❌ You don't have permission to use this command.",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
         elif isinstance(error, app_commands.CommandNotFound):
-            await interaction.response.send_message(
-                "❌ Command not found.",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Command not found.", ephemeral=True)
         else:
-            await interaction.response.send_message(
-                f"⚠️ An error occurred: {error}",
-                ephemeral=True
-            )
+            await interaction.response.send_message(f"⚠️ An error occurred: {error}", ephemeral=True)
             log.error(f"Unhandled error in help cog: {error}")
 
     @commands.Cog.listener()
     async def on_command_error(self, ctx: commands.Context, error: Exception):
         """Handle command errors gracefully."""
+        # FIX: Removed `ephemeral=True` since standard prefix commands do not accept it.
         if isinstance(error, commands.MissingPermissions):
-            await ctx.send("❌ You don't have permission to use this command.", ephemeral=True)
+            await ctx.send("❌ You don't have permission to use this command.")
         elif isinstance(error, commands.BotMissingPermissions):
-            await ctx.send("❌ I don't have permission to do that.", ephemeral=True)
+            await ctx.send("❌ I don't have permission to do that.")
         elif isinstance(error, commands.MissingRequiredArgument):
-            await ctx.send(f"❌ Missing required argument: `{error.param}`", ephemeral=True)
+            await ctx.send(f"❌ Missing required argument: `{error.param}`")
         elif isinstance(error, commands.BadArgument):
-            await ctx.send(f"❌ Invalid argument: {error}", ephemeral=True)
+            await ctx.send(f"❌ Invalid argument: {error}")
         else:
-            await ctx.send(f"⚠️ An error occurred: {error}", ephemeral=True)
+            await ctx.send(f"⚠️ An error occurred: {error}")
             log.error(f"Unhandled error in help cog: {error}")
 
 # ─── Setup Function ──────────────────────────────────────────────────
