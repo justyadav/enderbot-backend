@@ -44,7 +44,7 @@ class AdvancedBot(commands.Bot):
             await self.load_extension("help")
             log.info("Successfully loaded Help cog.")
         except Exception as e:
-            log.error(f"Failed to load Help cog: {e}")
+            log.warn(f"Help cog not loaded: {e}. (Ignore if help.py does not exist yet)")
 
     async def on_ready(self):
         """Executed when the bot successfully logs in."""
@@ -70,6 +70,7 @@ async def sync_commands(ctx: commands.Context):
     """Owner-only text command to sync slash commands globally."""
     await ctx.send("🔄 Syncing application commands globally...")
     try:
+        # discord.py v2: sync requires bot.tree.sync()
         synced = await bot.tree.sync()
         await ctx.send(f"✅ Successfully synced {len(synced)} slash commands globally.")
         log.info(f"Globally synced {len(synced)} application commands via owner request.")
