@@ -46,7 +46,7 @@ MONGO_URI = os.getenv("MONGO_URI", "")
 DB_NAME = os.getenv("DB_NAME", "discord_bot_db")
 VERSION = os.getenv("BOT_VERSION", "2.0.0")
 SUPPORT_SERVER_URL = os.getenv("SUPPORT_SERVER_URL", "https://discord.gg/PGwbyWX3DS")
-USE_MONGODB = os.getenv("USE_MONGODB", "false").lower() == "true")
+USE_MONGODB = os.getenv("USE_MONGODB", "false").lower() == "true"  # Fixed: removed extra ')'
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 
 # ─── OAuth Configuration ───
